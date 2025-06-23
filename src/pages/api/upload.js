@@ -16,29 +16,40 @@ export async function POST({ request }) {
       });
     }
 
+    console.log("Processing photo:", photo.name, "Size:", photo.size);
+
     // Convert image to base64
     const buffer = Buffer.from(await photo.arrayBuffer());
     const base64Image = buffer.toString("base64");
 
+    console.log("Calling Python API...");
+
+    // Get the base URL
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:4321";
+
     // Call Python API
-    const pythonResponse = await fetch(
-      `${process.env.VERCEL_URL ? "https://" + process.env.VERCEL_URL : "http://localhost:4321"}/api/process`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          image: base64Image,
-        }),
+    const pythonResponse = await fetch(`${baseUrl}/api/process`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({
+        image: base64Image,
+      }),
+    });
+
+    console.log("Python API response status:", pythonResponse.status);
 
     if (!pythonResponse.ok) {
-      throw new Error("Python processing failed");
+      const errorText = await pythonResponse.text();
+      console.error("Python API error:", errorText);
+      throw new Error(`Python processing failed: ${errorText}`);
     }
 
     const result = await pythonResponse.json();
+    console.log("Python API result:", result.success);
 
     if (!result.success) {
       throw new Error(result.error || "Processing failed");
@@ -50,6 +61,7 @@ export async function POST({ request }) {
     const icsPath = join(tempDir, icsFileName);
 
     await writeFile(icsPath, result.ics_content);
+    console.log("ICS file saved to:", icsPath);
 
     return new Response(
       JSON.stringify({
