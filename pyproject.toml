@@ -1,0 +1,13 @@
+[project]
+name = "erika-grafikas-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "icalendar>=6.3.1",
+    "numpy>=2.3.1",
+    "opencv-python>=4.11.0.86",
+    "pytesseract>=0.3.13",
+    "pytz>=2025.2",
+]
