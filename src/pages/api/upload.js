@@ -37,7 +37,7 @@ export async function POST({ request }) {
 
     // Run your Python script
     try {
-      const { stdout, stderr } = await execAsync("uv run python main.py", {
+      const { stdout, stderr } = await execAsync("python3 main.py", {
         cwd: process.cwd(),
       });
 
