@@ -1,11 +1,6 @@
-// src/pages/api/upload.js
-import { writeFile, readdir } from "fs/promises";
+import { writeFile } from "fs/promises";
 import { join } from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { tmpdir } from "os";
-
-const execAsync = promisify(exec);
 
 export const prerender = false;
 
@@ -21,92 +16,52 @@ export async function POST({ request }) {
       });
     }
 
-    // Use /tmp directory which is writable in serverless environments
-    const tempDir = tmpdir();
-    const imageFileName = `grafikas_${Date.now()}.jpg`;
-    const imagePath = join(tempDir, imageFileName);
-
-    // Save uploaded file
+    // Convert image to base64
     const buffer = Buffer.from(await photo.arrayBuffer());
-    await writeFile(imagePath, buffer);
+    const base64Image = buffer.toString("base64");
 
-    console.log(`Saved uploaded file to: ${imagePath}`);
-
-    // Create a temporary Python script that uses the correct paths
-    const pythonScript = `
-import sys
-import os
-sys.path.append('${process.cwd()}')
-
-# Change working directory to temp
-os.chdir('${tempDir}')
-
-# Copy main.py logic but use temp directory
-import re
-from datetime import datetime
-import cv2
-import numpy as np
-import pytesseract
-import pytz
-from icalendar import Calendar, Event
-
-# Set the image path to our temp file
-IMAGE_PATH = "${imagePath}"
-OUTPUT_TXT = "erika_schedule.txt"
-DEBUG_GRID = "debug_grid.png"
-DEBUG_CELLS = "debug_cells.png"
-NUM_DAYS = 31
-TARGET_ROW = 3
-
-# Your Python script logic here (copy from main.py)
-# ... [rest of your Python code]
-`;
-
-    const scriptPath = join(tempDir, "temp_script.py");
-    await writeFile(scriptPath, pythonScript);
-
-    // Run Python script in temp directory
-    try {
-      const { stdout, stderr } = await execAsync(`python3 ${scriptPath}`, {
-        cwd: tempDir,
-        env: { ...process.env, PYTHONPATH: process.cwd() },
-      });
-
-      console.log("Python output:", stdout);
-      if (stderr) console.log("Python stderr:", stderr);
-
-      // Check if ICS file was created in temp directory
-      const files = await readdir(tempDir);
-      const icsFile = files.find((file) => file.endsWith(".ics"));
-
-      if (icsFile) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            downloadUrl: `/api/download?file=${icsFile}&temp=true`,
-            filename: icsFile,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-      } else {
-        throw new Error("ICS file not generated");
-      }
-    } catch (pythonError) {
-      console.error("Python script error:", pythonError);
-      return new Response(
-        JSON.stringify({
-          error: "Failed to process schedule",
-          details: pythonError.message,
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
+    // Call Python API
+    const pythonResponse = await fetch(
+      `${process.env.VERCEL_URL ? "https://" + process.env.VERCEL_URL : "http://localhost:4321"}/api/process`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          image: base64Image,
+        }),
+      },
+    );
+
+    if (!pythonResponse.ok) {
+      throw new Error("Python processing failed");
     }
+
+    const result = await pythonResponse.json();
+
+    if (!result.success) {
+      throw new Error(result.error || "Processing failed");
+    }
+
+    // Save ICS content to temp file
+    const tempDir = tmpdir();
+    const icsFileName = result.filename || `darbo_grafikas_${Date.now()}.ics`;
+    const icsPath = join(tempDir, icsFileName);
+
+    await writeFile(icsPath, result.ics_content);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        downloadUrl: `/api/download?file=${icsFileName}&temp=true`,
+        filename: icsFileName,
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   } catch (error) {
     console.error("Upload error:", error);
     return new Response(
