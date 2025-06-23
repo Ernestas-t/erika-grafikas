@@ -1,44 +1,38 @@
-import { readfile } from "fs/promises";
+// src/pages/api/download.js
+import { readFile } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
 
 export const prerender = false;
 
-export async function get({ request, url }) {
+export async function GET({ request, url }) {
   try {
-    const searchparams = new url(request.url).searchparams;
-    const filename = searchparams.get("file");
-    const istemp = searchparams.get("temp") === "true";
+    const searchParams = new URL(request.url).searchParams;
+    const filename = searchParams.get("file");
 
-    if (!filename || !filename.endswith(".ics")) {
-      return new response("invalid file", { status: 400 });
+    if (!filename || !filename.endsWith(".ics")) {
+      return new Response("Invalid file", { status: 400 });
     }
 
-    // read from temp directory if it's a temporary file
-    const filepath = istemp
-      ? join(tmpdir(), filename)
-      : join(process.cwd(), filename);
+    // Read the ICS file from project root
+    const filePath = join(process.cwd(), filename);
+    const fileContent = await readFile(filePath);
 
-    console.log("reading file from:", filepath);
-
-    const filecontent = await readfile(filepath);
-
-    return new response(filecontent, {
+    return new Response(fileContent, {
       status: 200,
       headers: {
-        "content-type": "text/calendar; charset=utf-8",
-        "content-disposition": `attachment; filename="${filename}"`,
-        "cache-control": "no-cache",
-        "x-suggested-filename": filename,
-        "access-control-expose-headers": "content-disposition",
-        "x-content-type-options": "nosniff",
+        "Content-Type": "text/calendar; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-cache",
+        "X-Suggested-Filename": filename,
+        "Access-Control-Expose-Headers": "Content-Disposition",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error) {
-    console.error("download error:", error);
-    return new response("file not found", {
+    console.error("Download error:", error);
+    return new Response("File not found", {
       status: 404,
-      headers: { "content-type": "text/plain" },
+      headers: { "Content-Type": "text/plain" },
     });
   }
 }

@@ -1,6 +1,9 @@
 import { writeFile } from "fs/promises";
 import { join } from "path";
-import { tmpdir } from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 export const prerender = false;
 
@@ -16,64 +19,55 @@ export async function POST({ request }) {
       });
     }
 
-    console.log("Processing photo:", photo.name, "Size:", photo.size);
-
-    // Convert image to base64
+    // Save uploaded file as grafikas.jpg (what your Python script expects)
     const buffer = Buffer.from(await photo.arrayBuffer());
-    const base64Image = buffer.toString("base64");
+    const filePath = join(process.cwd(), "grafikas.jpg");
+    await writeFile(filePath, buffer);
 
-    console.log("Calling Python API...");
+    console.log(`Saved uploaded file to: ${filePath}`);
 
-    // Get the base URL
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:4321";
+    // Run your Python script with uv (Railway supports this!)
+    try {
+      const { stdout, stderr } = await execAsync("uv run python main.py", {
+        cwd: process.cwd(),
+      });
 
-    // Call Python API
-    const pythonResponse = await fetch(`${baseUrl}/api/process`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        image: base64Image,
-      }),
-    });
+      console.log("Python output:", stdout);
+      if (stderr) console.log("Python stderr:", stderr);
 
-    console.log("Python API response status:", pythonResponse.status);
+      // Check if ICS file was created
+      const { readdirSync } = await import("fs");
+      const files = readdirSync(process.cwd());
+      const icsFile = files.find((file) => file.endsWith(".ics"));
 
-    if (!pythonResponse.ok) {
-      const errorText = await pythonResponse.text();
-      console.error("Python API error:", errorText);
-      throw new Error(`Python processing failed: ${errorText}`);
+      if (icsFile) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            downloadUrl: `/api/download?file=${icsFile}`,
+            filename: icsFile,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      } else {
+        throw new Error("ICS file not generated");
+      }
+    } catch (pythonError) {
+      console.error("Python script error:", pythonError);
+      return new Response(
+        JSON.stringify({
+          error: "Failed to process schedule",
+          details: pythonError.message,
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
-
-    const result = await pythonResponse.json();
-    console.log("Python API result:", result.success);
-
-    if (!result.success) {
-      throw new Error(result.error || "Processing failed");
-    }
-
-    // Save ICS content to temp file
-    const tempDir = tmpdir();
-    const icsFileName = result.filename || `darbo_grafikas_${Date.now()}.ics`;
-    const icsPath = join(tempDir, icsFileName);
-
-    await writeFile(icsPath, result.ics_content);
-    console.log("ICS file saved to:", icsPath);
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        downloadUrl: `/api/download?file=${icsFileName}&temp=true`,
-        filename: icsFileName,
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
   } catch (error) {
     console.error("Upload error:", error);
     return new Response(
